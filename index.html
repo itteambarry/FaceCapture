@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BB Face Capture</title>
+    <link rel="stylesheet" href="app.css"/>
+</head>
+<body>
+    <video id="video" autoplay playsinline hidden></video>
+    <canvas id="canvas"></canvas>
+    <div id="flashBlock" hidden></div>
+    <div>
+        <div id="progressContainer">
+            <div id="progressBar"></div>
+        </div>
+        <button id="restartBtn">Restart</button>
+        <div id="instruction"></div>
+        <select id="colorSelect" hidden></select>
+    </div>
+    
+    
+    <script type="module" src="app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+</body>
+</html>
