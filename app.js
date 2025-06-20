@@ -11,12 +11,14 @@ const config = {
   ovalHeightRatio: 0.6, //識別區域長度
   widerOvalWidthRatio: 0.65, //近距離識別區域寬度
   widerOvalHeightRatio: 0.75, //近距離識別區域長度
+  msbOvalWidthRatio: 0.45, //MSB_Flash識別區域寬度 (slightly smaller)
+  msbOvalHeightRatio: 0.55, //MSB_Flash識別區域長度 (slightly smaller)
   ovalCenterYRatio: 2.0, //識別區域中心點在canvas中y軸偏移比例
   ovalOffsetYRatio: 0.125, //識別區域內中心點y軸偏移比例
   countdownDuration: 5,  //臉部錄像時長
   flashSecond: 0.8, //閃屏間隔時長
   flashFaceCaptureSec: 5,
-  availableOptions: ["noflash","red","orange", "VIB_Flash"] //閃屏顏色設置
+  availableOptions: ["noflash","red","orange", "VIB_Flash", "MSB_Flash"] //閃屏顏色設置
 };
 
 const video = document.getElementById("video");
@@ -41,6 +43,7 @@ const FRAME_INTERVAL = 1000 / FPS_TARGET;
 
 let isSecondCapture = false; //secondcapture 為近距離臉部錄像
 let isFlashFaceCapture = false;
+let isMSBFlashCapture = false; //MSB_Flash錄像
 let primaryBlobs = {
   video: null,
   photo: null
@@ -50,6 +53,10 @@ let secondaryBlobs = {
   photo: null
 };
 let flashFaceBlobs = {
+  video: null,
+  photo: null
+}
+let msbFlashBlobs = {
   video: null,
   photo: null
 }
@@ -67,6 +74,7 @@ function resetApplication() {
     isValidFace = false;
     isSecondCapture = false;
     isFlashFaceCapture = false;
+    isMSBFlashCapture = false;
 
     recordedChunks = [];
     primaryBlobs = {
@@ -78,6 +86,10 @@ function resetApplication() {
       photo: null
     };
     flashFaceBlobs = {
+      video: null,
+      photo: null
+    }
+    msbFlashBlobs = {
       video: null,
       photo: null
     }
@@ -230,9 +242,17 @@ function updateOvalDimensions() {
   ovalCenterX = canvasWidth / 2;
   ovalCenterY = canvasHeight / config.ovalCenterYRatio;
   
+  // Check if MSB_Flash is selected for smaller standard oval
+  const isMSBFlashSelected = colorSelect.options[colorSelect.selectedIndex]?.innerText === "MSB_Flash";
+  
   if (!isSecondCapture) {
-    ovalWidth = canvasWidth * config.ovalWidthRatio;
-    ovalHeight = canvasHeight * config.ovalHeightRatio;
+    if (isMSBFlashSelected) {
+      ovalWidth = canvasWidth * config.msbOvalWidthRatio;
+      ovalHeight = canvasHeight * config.msbOvalHeightRatio;
+    } else {
+      ovalWidth = canvasWidth * config.ovalWidthRatio;
+      ovalHeight = canvasHeight * config.ovalHeightRatio;
+    }
   } else {
     ovalWidth = canvasWidth * config.widerOvalWidthRatio;
     ovalHeight = canvasHeight * config.widerOvalHeightRatio;
@@ -279,10 +299,10 @@ function handleCountdown(now) {
       const elapsedSeconds = (now - countdownStartTime) / 1000;
       const progressPercent = Math.min((elapsedSeconds / config.countdownDuration) * 100, 100);
 
-      if((elapsedSeconds > config.countdownDuration / 4) & colorSelect.options[colorSelect.selectedIndex].innerText != "VIB_Flash") {
+      if((elapsedSeconds > config.countdownDuration / 4) & colorSelect.options[colorSelect.selectedIndex].innerText != "VIB_Flash" && colorSelect.options[colorSelect.selectedIndex].innerText != "MSB_Flash") {
         flashBlock.hidden = elapsedSeconds % config.flashSecond * 2 < config.flashSecond;
       }
-      else if(isFlashFaceCapture)
+      else if(isFlashFaceCapture || isMSBFlashCapture)
       {
         flashBlock.hidden = false;
       }
@@ -442,6 +462,11 @@ async function saveAllCaptures() {
       zip.file(`face-capture-VIB_Flash-${timestamp}.jpg`, flashFaceBlobs.photo);
     }
     
+    if(colorSelect.options[colorSelect.selectedIndex].innerText == "MSB_Flash") {
+      zip.file(`face-capture-MSB_Flash-${timestamp}.${fileExtension}`, msbFlashBlobs.video);
+      zip.file(`face-capture-MSB_Flash-${timestamp}.jpg`, msbFlashBlobs.photo);
+    }
+    
     const zipBlob = await zip.generateAsync({type: "blob"});
     const zipUrl = URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
@@ -480,7 +505,7 @@ async function completeSecondCapture() {
         secondaryBlobs.video = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
         secondaryBlobs.photo = await capturePhoto();
         
-        if(colorSelect.options[colorSelect.selectedIndex].innerText != "VIB_Flash") {
+        if(colorSelect.options[colorSelect.selectedIndex].innerText != "VIB_Flash" && colorSelect.options[colorSelect.selectedIndex].innerText != "MSB_Flash") {
           const saveSuccess = await saveAllCaptures();
           if (saveSuccess) {
             instructionText.innerText = "All captures saved!";
@@ -552,7 +577,7 @@ async function completeCountdown() {
           instructionText.innerText = "Error processing first capture";
           restartButton.style.display = "block";
         }
-      } else if(isSecondCapture && !isFlashFaceCapture) {
+      } else if(isSecondCapture && !isFlashFaceCapture && !isMSBFlashCapture) {
         if(colorSelect.options[colorSelect.selectedIndex].innerText == "VIB_Flash")
         {
           const secondarySuccess = await processSecondaryCapture();
