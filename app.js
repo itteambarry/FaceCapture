@@ -56,10 +56,6 @@ let flashFaceBlobs = {
   video: null,
   photo: null
 }
-let msbFlashBlobs = {
-  video: null,
-  photo: null
-}
 
 let countdownActive = false;
 let countdownStartTime = 0;
@@ -86,10 +82,6 @@ function resetApplication() {
       photo: null
     };
     flashFaceBlobs = {
-      video: null,
-      photo: null
-    }
-    msbFlashBlobs = {
       video: null,
       photo: null
     }
@@ -473,8 +465,8 @@ async function saveAllCaptures() {
     }
     
     if(colorSelect.options[colorSelect.selectedIndex].innerText == "MSB_Flash") {
-      zip.file(`face-capture-MSB_Flash-${timestamp}.${fileExtension}`, msbFlashBlobs.video);
-      zip.file(`face-capture-MSB_Flash-${timestamp}.jpg`, msbFlashBlobs.photo);
+      zip.file(`face-capture-MSB_Flash-${timestamp}.${fileExtension}`, flashFaceBlobs.video);
+      zip.file(`face-capture-MSB_Flash-${timestamp}.jpg`, flashFaceBlobs.photo);
     }
     
     const zipBlob = await zip.generateAsync({type: "blob"});
