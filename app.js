@@ -137,6 +137,9 @@ function setColor() {
         flashBlock.style.backgroundColor = colorSelect.value;
         colorSelect.style.backgroundColor = colorSelect.value;
     }
+    
+    // Update oval dimensions when color selection changes (for MSB_Flash)
+    updateOvalDimensions();
 }
 
 async function initialize() {
