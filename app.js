@@ -114,6 +114,13 @@ function initOptions(){
           option.innerText = "VIB_Flash";
           colorSelect.appendChild(option);
         }
+        else if(color === "MSB_Flash")
+        {
+          var option = document.createElement("option");
+          option.value = "#ee5d35";
+          option.innerText = "MSB_Flash";
+          colorSelect.appendChild(option);
+        }
         else{
           var option = document.createElement("option");
           option.value = color;
@@ -581,7 +588,7 @@ async function completeCountdown() {
           restartButton.style.display = "block";
         }
       } else if(isSecondCapture && !isFlashFaceCapture && !isMSBFlashCapture) {
-        if(colorSelect.options[colorSelect.selectedIndex].innerText == "VIB_Flash")
+        if(colorSelect.options[colorSelect.selectedIndex].innerText == "VIB_Flash" || colorSelect.options[colorSelect.selectedIndex].innerText == "MSB_Flash")
         {
           const secondarySuccess = await processSecondaryCapture();
           if(secondarySuccess) {
