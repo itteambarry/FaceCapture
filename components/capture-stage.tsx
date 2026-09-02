@@ -327,12 +327,14 @@ export function CaptureStage({ active }: CaptureStageProps) {
         recCanvasRef.current
       );
       recStopRef.current = built.stop;
-      const bitrate = currentTaskRef.current?.videoBitsPerSecond ?? 16_000_000;
+      const task = currentTaskRef.current;
+      const bitrate = task?.videoBitsPerSecond ?? 16_000_000;
       const recorder = startMediaRecorder(built.stream, bitrate);
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
-      recorder.start();
+      if (task?.videoTimesliceMs) recorder.start(task.videoTimesliceMs);
+      else recorder.start();
       recorderRef.current = recorder;
     } catch {
       setInstruction("Recording not supported in this browser");
@@ -399,15 +401,17 @@ export function CaptureStage({ active }: CaptureStageProps) {
 
     try {
       const task = currentTaskRef.current;
-      const photo = await capturePhotoFromVideo(
-        videoEl,
-        task
-          ? {
-              width: task.photoResolutionX ?? task.resolutionX,
-              height: task.photoResolutionY ?? task.resolutionY,
-            }
-          : undefined
-      );
+      const photoWidth = task?.photoResolutionX ?? task?.resolutionX;
+      const photoHeight = task?.photoResolutionY ?? task?.resolutionY;
+      const photo =
+        task && !photoWidth
+          ? null
+          : await capturePhotoFromVideo(
+              videoEl,
+              photoWidth && photoHeight
+                ? { width: photoWidth, height: photoHeight }
+                : undefined
+            );
 
       if (task && bankIdRef.current) {
         bankBlobsRef.current.push({
@@ -807,11 +811,21 @@ export function CaptureStage({ active }: CaptureStageProps) {
     setFaceDirection("");
     setTurnArrow(null);
 
+    const previousBank = bankIdRef.current;
+    const ktbResolution = RESOLUTIONS.find(
+      (item) => item.width === 1280 && item.height === 720
+    );
+
     if (isBankId(value)) {
       bankIdRef.current = value;
       bankBlobsRef.current = [];
       taskIndexRef.current = 0;
       applyTask(BANKS[value][0], 0, value);
+      if (value === "KTB" && ktbResolution) {
+        void startCamera(ktbResolution);
+      } else if (previousBank === "KTB" && resolutionRef.current) {
+        void startCamera(resolutionRef.current);
+      }
       setPhase("capturing");
       return;
     }
@@ -827,6 +841,9 @@ export function CaptureStage({ active }: CaptureStageProps) {
     setFlashColor(option?.color ?? null);
     setFlashVisible(Boolean(option?.color));
     applyOvalParams(genericOvalParams(false));
+    if (previousBank === "KTB" && resolutionRef.current) {
+      void startCamera(resolutionRef.current);
+    }
     setInstruction("Position your face in the oval");
     setPhase("capturing");
   }

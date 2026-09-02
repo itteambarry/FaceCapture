@@ -33,7 +33,9 @@ export type BankTask = {
   videoResolutionX?: number;
   videoResolutionY?: number;
   videoRotate90CW?: boolean;
+  videoAdaptivePortrait?: boolean;
   videoBitsPerSecond?: number;
+  videoTimesliceMs?: number;
   isTurnFace?: boolean;
   showFullFramePreview?: boolean;
   ovalSizeTrans?: OvalSizeTrans;
@@ -507,7 +509,9 @@ export const BANKS: Record<BankId, BankTask[]> = {
       videoResolutionX: 1280,
       videoResolutionY: 720,
       videoRotate90CW: true,
+      videoAdaptivePortrait: true,
       videoBitsPerSecond: 2_000_000,
+      videoTimesliceMs: 200,
       isVideo: true,
       ovalWidthRatio: 0.9,
       ovalHeightRatio: 0.675,
@@ -532,7 +536,9 @@ export const BANKS: Record<BankId, BankTask[]> = {
       videoResolutionX: 1280,
       videoResolutionY: 720,
       videoRotate90CW: true,
+      videoAdaptivePortrait: true,
       videoBitsPerSecond: 2_000_000,
+      videoTimesliceMs: 200,
       isVideo: true,
       ovalWidthRatio: 0.9,
       ovalHeightRatio: 0.675,
@@ -557,7 +563,9 @@ export const BANKS: Record<BankId, BankTask[]> = {
       videoResolutionX: 1280,
       videoResolutionY: 720,
       videoRotate90CW: true,
+      videoAdaptivePortrait: true,
       videoBitsPerSecond: 2_000_000,
+      videoTimesliceMs: 200,
       isVideo: true,
       ovalWidthRatio: 0.9,
       ovalHeightRatio: 0.675,
@@ -582,7 +590,9 @@ export const BANKS: Record<BankId, BankTask[]> = {
       videoResolutionX: 1280,
       videoResolutionY: 720,
       videoRotate90CW: true,
+      videoAdaptivePortrait: true,
       videoBitsPerSecond: 2_000_000,
+      videoTimesliceMs: 200,
       isVideo: true,
       ovalWidthRatio: 0.9,
       ovalHeightRatio: 0.675,
@@ -607,7 +617,9 @@ export const BANKS: Record<BankId, BankTask[]> = {
       videoResolutionX: 1280,
       videoResolutionY: 720,
       videoRotate90CW: true,
+      videoAdaptivePortrait: true,
       videoBitsPerSecond: 2_000_000,
+      videoTimesliceMs: 200,
       isVideo: true,
       ovalWidthRatio: 0.9,
       ovalHeightRatio: 0.675,

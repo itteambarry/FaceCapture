@@ -47,3 +47,4 @@ GitHub Pages can only serve static files, so the app is built with `output: "exp
 - HTTPS (or `localhost`) is required for camera and install.
 - Face detection loads MediaPipe WASM from jsDelivr on first use.
 - If the camera is blocked or missing, the app shows a permission error and a Restart control.
+- Video encoding matches the original PWA: raw camera H.264 MP4 at 16 Mbps when the browser allows it, otherwise WebM with the browser default bitrate. DAB is 1 Mbps rotated 1920×1440; KTB is 2 Mbps 720×1280 with no still photos. Bank JPEGs are quality 0.95 at that bank’s photo size.

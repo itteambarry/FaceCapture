@@ -9,18 +9,11 @@ export async function openUserCamera(resolution: ResolutionOption): Promise<Medi
     {
       audio: false,
       video: {
-        width: { exact: resolution.width },
-        height: { exact: resolution.height },
-        frameRate: { ideal: 30, max: 30 },
-        facingMode: { ideal: "user" },
-      },
-    },
-    {
-      audio: false,
-      video: {
-        width: { min: resolution.width, ideal: resolution.width },
-        height: { min: resolution.height, ideal: resolution.height },
-        facingMode: { ideal: "user" },
+        width: { ideal: resolution.width },
+        height: { ideal: resolution.height },
+        aspectRatio: { exact: aspectRatio },
+        frameRate: { min: 24, ideal: 30, max: 30 },
+        facingMode: "user",
       },
     },
     {
@@ -29,8 +22,8 @@ export async function openUserCamera(resolution: ResolutionOption): Promise<Medi
         width: { ideal: resolution.width },
         height: { ideal: resolution.height },
         aspectRatio: { exact: aspectRatio },
-        frameRate: { min: 24, ideal: 30, max: 30 },
-        facingMode: { ideal: "user" },
+        frameRate: { max: 30 },
+        facingMode: "user",
       },
     },
     {
@@ -38,12 +31,12 @@ export async function openUserCamera(resolution: ResolutionOption): Promise<Medi
       video: {
         width: { ideal: resolution.width },
         height: { ideal: resolution.height },
-        facingMode: { ideal: "user" },
+        facingMode: "user",
       },
     },
     {
       audio: false,
-      video: { facingMode: { ideal: "user" } },
+      video: { facingMode: "user" },
     },
   ];
 
@@ -61,25 +54,6 @@ export async function openUserCamera(resolution: ResolutionOption): Promise<Medi
 
   if (!stream) {
     throw lastError instanceof Error ? lastError : new Error("Camera access error");
-  }
-
-  const track = stream.getVideoTracks()[0];
-  if (track?.applyConstraints) {
-    try {
-      await track.applyConstraints({
-        width: { exact: resolution.width },
-        height: { exact: resolution.height },
-      });
-    } catch {
-      try {
-        await track.applyConstraints({
-          width: { ideal: resolution.width },
-          height: { ideal: resolution.height },
-        });
-      } catch {
-        /* keep whatever the device granted */
-      }
-    }
   }
 
   return stream;

@@ -94,22 +94,20 @@ export function capturePhotoFromVideo(
 }
 
 const DEFAULT_VIDEO_BITRATE = 16_000_000;
+const MP4_MIME = "video/mp4;codecs=avc1.42E01E, mp4a.40.2";
 
 export function startMediaRecorder(
   stream: MediaStream,
   bitsPerSecond = DEFAULT_VIDEO_BITRATE
 ): MediaRecorder {
-  const options: MediaRecorderOptions = { videoBitsPerSecond: bitsPerSecond };
-  const mimeTypes = [
-    "video/mp4;codecs=avc1.42E01E, mp4a.40.2",
-    "video/mp4;codecs=avc1.42E01E",
-    "video/webm;codecs=vp9",
-    "video/webm;codecs=vp8",
-    "video/webm",
-  ];
-  const mimeType = mimeTypes.find((type) => MediaRecorder.isTypeSupported(type));
-  if (mimeType) options.mimeType = mimeType;
-  return new MediaRecorder(stream, options);
+  try {
+    return new MediaRecorder(stream, {
+      mimeType: MP4_MIME,
+      videoBitsPerSecond: bitsPerSecond,
+    });
+  } catch {
+    return new MediaRecorder(stream, { mimeType: "video/webm" });
+  }
 }
 
 export function buildRecordingStream(
@@ -117,17 +115,35 @@ export function buildRecordingStream(
   task: BankTask | null,
   recCanvas: HTMLCanvasElement
 ): { stream: MediaStream; stop: () => void } {
-  const rotate = Boolean(task?.videoRotate90CW);
-  const targetW = task?.videoResolutionX;
-  const targetH = task?.videoResolutionY;
+  const rotateWanted = Boolean(task?.videoRotate90CW);
+  let targetW = task?.videoResolutionX;
+  let targetH = task?.videoResolutionY;
+
+  // KTB: landscape config + portrait output → swap so the canvas is 720×1280.
+  if (
+    task?.videoAdaptivePortrait &&
+    rotateWanted &&
+    targetW &&
+    targetH &&
+    targetW > targetH
+  ) {
+    const swappedW = targetH;
+    targetH = targetW;
+    targetW = swappedW;
+  }
 
   // Same as original: raw webcam stream unless a bank task needs rotate/resize.
-  if (!rotate && !targetW && !targetH) {
+  if (!rotateWanted && !targetW && !targetH) {
     return { stream: video.srcObject as MediaStream, stop: () => undefined };
   }
 
-  const outW = targetW || (rotate ? video.videoHeight : video.videoWidth);
-  const outH = targetH || (rotate ? video.videoWidth : video.videoHeight);
+  const sensorIsLandscape = video.videoWidth > video.videoHeight;
+  const applyRotation = task?.videoAdaptivePortrait
+    ? rotateWanted && sensorIsLandscape
+    : rotateWanted;
+
+  const outW = targetW || (applyRotation ? video.videoHeight : video.videoWidth);
+  const outH = targetH || (applyRotation ? video.videoWidth : video.videoHeight);
   recCanvas.width = outW;
   recCanvas.height = outH;
   const ctx = recCanvas.getContext("2d");
@@ -149,10 +165,14 @@ export function buildRecordingStream(
     }
     lastPaint = timestamp || 0;
     ctx.save();
-    if (rotate) {
+    if (applyRotation) {
       ctx.translate(recCanvas.width, 0);
       ctx.rotate(Math.PI / 2);
-      ctx.drawImage(video, 0, 0, outH, outW);
+      if (task?.videoAdaptivePortrait) {
+        ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+      } else {
+        ctx.drawImage(video, 0, 0, outH, outW);
+      }
     } else {
       ctx.drawImage(video, 0, 0, outW, outH);
     }
