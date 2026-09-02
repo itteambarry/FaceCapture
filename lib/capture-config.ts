@@ -1,3 +1,5 @@
+import { withBase } from "@/lib/base-path";
+
 export const APP_NAME = "BB Face Capture";
 export const APP_SHORT_NAME = "FaceCapture";
 
@@ -40,4 +42,4 @@ export const CAPTURE = {
 
 export const MEDIAPIPE_WASM_CDN =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
-export const FACE_MODEL_PATH = "/wasm/blaze_face_short_range.tflite";
+export const FACE_MODEL_PATH = withBase("/wasm/blaze_face_short_range.tflite");

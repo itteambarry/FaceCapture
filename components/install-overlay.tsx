@@ -4,6 +4,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { Button } from "@/components/ui/button";
+import { withBase } from "@/lib/base-path";
 import { useBrowserFlag } from "@/hooks/use-browser-flag";
 import { APP_NAME, APP_SHORT_NAME } from "@/lib/capture-config";
 import {
@@ -81,7 +82,7 @@ export function InstallOverlay({ open, onContinue }: InstallOverlayProps) {
     >
       <div className="w-full max-w-[400px] rounded-2xl border border-emerald-400/45 bg-[#141416] p-5 pt-[22px] shadow-[0_12px_40px_rgba(0,0,0,.5)]">
         <img
-          src="/icons/icon-192.png"
+          src={withBase("/icons/icon-192.png")}
           alt=""
           width={56}
           height={56}
@@ -111,7 +112,7 @@ export function InstallOverlay({ open, onContinue }: InstallOverlayProps) {
               <div className="relative h-[200px] overflow-hidden rounded-xl bg-linear-to-b from-[#1a1b22] to-[#0e0f14]">
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_25%,rgba(52,211,153,.35),transparent_45%),radial-gradient(circle_at_80%_60%,rgba(59,130,246,.25),transparent_40%)] opacity-35" />
                 <img
-                  src="/icons/icon-192.png"
+                  src={withBase("/icons/icon-192.png")}
                   alt=""
                   className="absolute top-[28%] left-1/2 z-10 size-[52px] -translate-x-1/2 rounded-xl shadow-lg animate-[flyDrawer_2.4s_ease-in-out_infinite]"
                 />
@@ -144,7 +145,7 @@ export function InstallOverlay({ open, onContinue }: InstallOverlayProps) {
               <div className="relative h-[220px] overflow-hidden rounded-xl bg-[#111111]">
                 <div className="flex flex-col items-center pt-6">
                   <img
-                    src="/icons/icon-192.png"
+                    src={withBase("/icons/icon-192.png")}
                     alt=""
                     className="size-14 rounded-xl"
                   />

@@ -36,6 +36,12 @@ npm start -- --port 43147
 
 Production mode also registers a service worker so the app can be installed as a PWA.
 
+## GitHub Pages
+
+This repo deploys a static export to [https://itteambarry.github.io/FaceCapture/](https://itteambarry.github.io/FaceCapture/) on every push to `main`.
+
+GitHub Pages can only serve static files, so the app is built with `output: "export"` and `basePath: /FaceCapture`. If the site still shows this README, switch **Settings → Pages → Source** to **GitHub Actions**.
+
 ## Notes
 
 - HTTPS (or `localhost`) is required for camera and install.

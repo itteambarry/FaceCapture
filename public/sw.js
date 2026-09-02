@@ -1,11 +1,11 @@
-const CACHE_VERSION = "facecapture-v1";
+const CACHE_VERSION = "facecapture-v2";
 
 const PRECACHE = [
-  "/",
-  "/manifest.json",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/apple-touch-icon.png",
+  "./",
+  "./manifest.json",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png",
+  "./apple-touch-icon.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -55,7 +55,7 @@ self.addEventListener("fetch", (event) => {
         if (cached) return cached;
         if (req.mode === "navigate") {
           return (
-            (await caches.match("/")) ||
+            (await caches.match("./")) ||
             new Response("Offline — connect to the internet and try again.", {
               status: 503,
               headers: { "Content-Type": "text/plain; charset=utf-8" },
