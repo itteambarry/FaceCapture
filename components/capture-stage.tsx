@@ -324,11 +324,10 @@ export function CaptureStage({ active }: CaptureStageProps) {
       const built = buildRecordingStream(
         video,
         currentTaskRef.current,
-        recCanvasRef.current,
-        resolutionRef.current ?? undefined
+        recCanvasRef.current
       );
       recStopRef.current = built.stop;
-      const bitrate = currentTaskRef.current?.videoBitsPerSecond ?? 8_000_000;
+      const bitrate = currentTaskRef.current?.videoBitsPerSecond ?? 16_000_000;
       const recorder = startMediaRecorder(built.stream, bitrate);
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
@@ -400,11 +399,15 @@ export function CaptureStage({ active }: CaptureStageProps) {
 
     try {
       const task = currentTaskRef.current;
-      const selected = resolutionRef.current;
-      const photo = await capturePhotoFromVideo(videoEl, {
-        width: task?.photoResolutionX ?? task?.resolutionX ?? selected?.width,
-        height: task?.photoResolutionY ?? task?.resolutionY ?? selected?.height,
-      });
+      const photo = await capturePhotoFromVideo(
+        videoEl,
+        task
+          ? {
+              width: task.photoResolutionX ?? task.resolutionX,
+              height: task.photoResolutionY ?? task.resolutionY,
+            }
+          : undefined
+      );
 
       if (task && bankIdRef.current) {
         bankBlobsRef.current.push({

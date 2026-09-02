@@ -71,32 +71,6 @@ export async function downloadBankZip(captures: BankCapture[]) {
   triggerDownload(await zip.generateAsync({ type: "blob" }), `face-captures-${timestamp}.zip`);
 }
 
-export function drawVideoCover(
-  ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
-  outW: number,
-  outH: number,
-  rotate90CW = false
-) {
-  ctx.save();
-  if (rotate90CW) {
-    ctx.translate(outW, 0);
-    ctx.rotate(Math.PI / 2);
-    const drawW = outH;
-    const drawH = outW;
-    const scale = Math.max(drawW / video.videoWidth, drawH / video.videoHeight);
-    const dw = video.videoWidth * scale;
-    const dh = video.videoHeight * scale;
-    ctx.drawImage(video, (drawW - dw) / 2, (drawH - dh) / 2, dw, dh);
-  } else {
-    const scale = Math.max(outW / video.videoWidth, outH / video.videoHeight);
-    const dw = video.videoWidth * scale;
-    const dh = video.videoHeight * scale;
-    ctx.drawImage(video, (outW - dw) / 2, (outH - dh) / 2, dw, dh);
-  }
-  ctx.restore();
-}
-
 export function capturePhotoFromVideo(
   video: HTMLVideoElement,
   size?: { width?: number; height?: number }
@@ -106,7 +80,7 @@ export function capturePhotoFromVideo(
   canvas.height = size?.height || video.videoHeight;
   const ctx = canvas.getContext("2d");
   if (!ctx) return Promise.reject(new Error("Canvas unavailable"));
-  drawVideoCover(ctx, video, canvas.width, canvas.height);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -119,34 +93,35 @@ export function capturePhotoFromVideo(
   });
 }
 
+const DEFAULT_VIDEO_BITRATE = 16_000_000;
+
 export function startMediaRecorder(
   stream: MediaStream,
-  bitsPerSecond = 8_000_000
+  bitsPerSecond = DEFAULT_VIDEO_BITRATE
 ): MediaRecorder {
-  const mp4 = "video/mp4;codecs=avc1.42E01E, mp4a.40.2";
-  try {
-    return new MediaRecorder(stream, {
-      mimeType: mp4,
-      videoBitsPerSecond: bitsPerSecond,
-    });
-  } catch {
-    return new MediaRecorder(stream, {
-      mimeType: "video/webm",
-      videoBitsPerSecond: bitsPerSecond,
-    });
-  }
+  const options: MediaRecorderOptions = { videoBitsPerSecond: bitsPerSecond };
+  const mimeTypes = [
+    "video/mp4;codecs=avc1.42E01E, mp4a.40.2",
+    "video/mp4;codecs=avc1.42E01E",
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+  ];
+  const mimeType = mimeTypes.find((type) => MediaRecorder.isTypeSupported(type));
+  if (mimeType) options.mimeType = mimeType;
+  return new MediaRecorder(stream, options);
 }
 
 export function buildRecordingStream(
   video: HTMLVideoElement,
   task: BankTask | null,
-  recCanvas: HTMLCanvasElement,
-  fallback?: { width: number; height: number }
+  recCanvas: HTMLCanvasElement
 ): { stream: MediaStream; stop: () => void } {
   const rotate = Boolean(task?.videoRotate90CW);
-  const targetW = task?.videoResolutionX ?? fallback?.width;
-  const targetH = task?.videoResolutionY ?? fallback?.height;
+  const targetW = task?.videoResolutionX;
+  const targetH = task?.videoResolutionY;
 
+  // Same as original: raw webcam stream unless a bank task needs rotate/resize.
   if (!rotate && !targetW && !targetH) {
     return { stream: video.srcObject as MediaStream, stop: () => undefined };
   }
@@ -156,26 +131,45 @@ export function buildRecordingStream(
   recCanvas.width = outW;
   recCanvas.height = outH;
   const ctx = recCanvas.getContext("2d");
-  if (!ctx) {
+  if (!ctx || !video.srcObject) {
     return { stream: video.srcObject as MediaStream, stop: () => undefined };
   }
 
+  const vfcSupported =
+    typeof HTMLVideoElement.prototype.requestVideoFrameCallback === "function";
   let raf = 0;
   let lastPaint = 0;
-  const draw = (timestamp: number) => {
-    if (timestamp - lastPaint < 30) {
+  let stopped = false;
+
+  const draw = (timestamp?: number) => {
+    if (stopped) return;
+    if (!vfcSupported && timestamp && timestamp - lastPaint < 30) {
       raf = requestAnimationFrame(draw);
       return;
     }
-    lastPaint = timestamp;
-    drawVideoCover(ctx, video, outW, outH, rotate);
-    raf = requestAnimationFrame(draw);
+    lastPaint = timestamp || 0;
+    ctx.save();
+    if (rotate) {
+      ctx.translate(recCanvas.width, 0);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(video, 0, 0, outH, outW);
+    } else {
+      ctx.drawImage(video, 0, 0, outW, outH);
+    }
+    ctx.restore();
+    raf = vfcSupported
+      ? video.requestVideoFrameCallback(draw)
+      : requestAnimationFrame(draw);
   };
-  raf = requestAnimationFrame(draw);
+  draw();
 
   return {
     stream: recCanvas.captureStream(),
-    stop: () => cancelAnimationFrame(raf),
+    stop: () => {
+      stopped = true;
+      if (vfcSupported) video.cancelVideoFrameCallback(raf);
+      else cancelAnimationFrame(raf);
+    },
   };
 }
 
