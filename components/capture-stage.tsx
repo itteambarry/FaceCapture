@@ -2,26 +2,41 @@
 
 import { Button } from "@/components/ui/button";
 import {
+  BANKS,
+  MODE_OPTIONS,
+  flashCssColor,
+  isBankId,
+  type BankId,
+  type BankTask,
+} from "@/lib/bank-profiles";
+import {
   CAPTURE,
   FACE_MODEL_PATH,
-  FLASH_MODES,
   MEDIAPIPE_WASM_CDN,
   RESOLUTIONS,
-  type FlashModeId,
   type ResolutionOption,
 } from "@/lib/capture-config";
+import { getFaceDirection, turnConflicts, type FaceDirection } from "@/lib/face-direction";
 import {
   canvasSizeForViewport,
   computeOval,
+  genericOvalParams,
   guidanceText,
   isFaceCentered,
   isFaceWithinFillRange,
+  sizeTransAt,
+  taskOvalParams,
   type OvalGeometry,
+  type OvalParams,
 } from "@/lib/face-geometry";
 import {
+  buildRecordingStream,
   capturePhotoFromVideo,
+  downloadBankZip,
   downloadCaptureZip,
+  lockManualWhiteBalance,
   startMediaRecorder,
+  type BankCapture,
   type CapturePair,
 } from "@/lib/save-captures";
 import type { Detection, FaceDetector } from "@mediapipe/tasks-vision";
@@ -35,6 +50,8 @@ type Phase =
   | "done"
   | "error";
 
+type SizePhase = "waitFrom" | "grow" | "waitTo" | "hold";
+
 type CaptureStageProps = {
   active: boolean;
 };
@@ -42,11 +59,14 @@ type CaptureStageProps = {
 export function CaptureStage({ active }: CaptureStageProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const recCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const detectorRef = useRef<FaceDetector | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const recStopRef = useRef<(() => void) | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const ovalRef = useRef<OvalGeometry | null>(null);
+  const ovalParamsRef = useRef<OvalParams>(genericOvalParams(false));
   const closeUpRef = useRef(false);
   const validFaceRef = useRef(false);
   const countdownRef = useRef<{ active: boolean; startedAt: number }>({
@@ -57,20 +77,33 @@ export function CaptureStage({ active }: CaptureStageProps) {
   const standardRef = useRef<CapturePair>({ video: null, photo: null });
   const closeUpBlobsRef = useRef<CapturePair>({ video: null, photo: null });
   const flashColorRef = useRef<string | null>(null);
+  const genericFlashRef = useRef<string | null>(null);
   const resolutionRef = useRef<ResolutionOption | null>(null);
   const takeLockRef = useRef(false);
+  const modeRef = useRef("noflash");
+  const bankIdRef = useRef<BankId | null>(null);
+  const taskIndexRef = useRef(0);
+  const bankBlobsRef = useRef<BankCapture[]>([]);
+  const currentTaskRef = useRef<BankTask | null>(null);
+  const sizePhaseRef = useRef<SizePhase | null>(null);
+  const sizeHoldStartRef = useRef(0);
+  const sizeGrowStartRef = useRef(0);
+  const fullFrameRef = useRef(false);
 
   const [phase, setPhase] = useState<Phase>("pick-resolution");
   const [instruction, setInstruction] = useState("Please Select Resolution");
+  const [turnArrow, setTurnArrow] = useState<"left" | "right" | null>(null);
   const [resolutionLabel, setResolutionLabel] = useState("");
   const [progress, setProgress] = useState(0);
   const [showProgress, setShowProgress] = useState(false);
   const [showRestart, setShowRestart] = useState(false);
-  const [showFlashSelect, setShowFlashSelect] = useState(false);
-  const [flashMode, setFlashMode] = useState<FlashModeId>("noflash");
+  const [showModeSelect, setShowModeSelect] = useState(false);
+  const [modeId, setModeId] = useState("noflash");
   const [flashVisible, setFlashVisible] = useState(false);
   const [flashColor, setFlashColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [taskBadge, setTaskBadge] = useState("");
+  const [faceDirection, setFaceDirection] = useState("");
 
   const stopRecorder = useCallback(() => {
     const rec = recorderRef.current;
@@ -80,6 +113,8 @@ export function CaptureStage({ active }: CaptureStageProps) {
     }
     recorderRef.current = null;
     chunksRef.current = [];
+    recStopRef.current?.();
+    recStopRef.current = null;
   }, []);
 
   const stopCamera = useCallback(() => {
@@ -97,8 +132,67 @@ export function CaptureStage({ active }: CaptureStageProps) {
     );
     canvas.width = width;
     canvas.height = height;
-    ovalRef.current = computeOval(width, height, closeUpRef.current);
+    ovalRef.current = computeOval(width, height, ovalParamsRef.current);
   }, []);
+
+  const applyOvalParams = useCallback(
+    (params: OvalParams) => {
+      ovalParamsRef.current = params;
+      resizeCanvas();
+    },
+    [resizeCanvas]
+  );
+
+  const applyTask = useCallback(
+    (task: BankTask, index: number, bank: BankId) => {
+      currentTaskRef.current = task;
+      fullFrameRef.current = Boolean(task.showFullFramePreview);
+      const trans = task.ovalSizeTrans;
+      if (trans) {
+        sizePhaseRef.current = "waitFrom";
+        sizeHoldStartRef.current = 0;
+        sizeGrowStartRef.current = 0;
+        applyOvalParams(
+          taskOvalParams(task, {
+            widthRatio: trans.fromWidthRatio,
+            heightRatio: trans.fromHeightRatio,
+            minFillRatio: trans.fromMinFillRatio,
+            maxFillRatio: trans.fromMaxFillRatio,
+            maxOffsetX: trans.fromMaxOffsetX,
+            maxOffsetY: trans.fromMaxOffsetY,
+          })
+        );
+      } else {
+        sizePhaseRef.current = null;
+        applyOvalParams(taskOvalParams(task));
+      }
+
+      const css = flashCssColor(task.color);
+      flashColorRef.current = css;
+      setFlashColor(css);
+      setFlashVisible(false);
+      setTaskBadge(`${bank} · ${task.label} (${index + 1}/${BANKS[bank].length})`);
+      setTurnArrow(null);
+      countdownRef.current = { active: false, startedAt: 0 };
+      validFaceRef.current = false;
+      takeLockRef.current = false;
+      setShowProgress(false);
+      setProgress(0);
+      setInstruction(
+        task.label === "Left"
+          ? "Turn your face left"
+          : task.label === "Right"
+            ? "Turn your face right"
+            : "Position your face in the oval"
+      );
+
+      const stream = streamRef.current;
+      if (stream && task.manualCameraSettings?.colorTemperature) {
+        void lockManualWhiteBalance(stream, task.manualCameraSettings.colorTemperature);
+      }
+    },
+    [applyOvalParams]
+  );
 
   const drawFrame = useCallback((detections: Detection[]) => {
     const canvas = canvasRef.current;
@@ -114,22 +208,26 @@ export function CaptureStage({ active }: CaptureStageProps) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    ctx.globalCompositeOperation = "destination-in";
-    ctx.beginPath();
-    ctx.ellipse(
-      oval.centerX,
-      oval.centerY,
-      oval.width / 2,
-      oval.height / 2,
-      0,
-      0,
-      Math.PI * 2
-    );
-    ctx.fillStyle = "white";
-    ctx.fill();
-    ctx.globalCompositeOperation = "source-over";
+    if (!fullFrameRef.current) {
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.beginPath();
+      ctx.ellipse(
+        oval.centerX,
+        oval.centerY,
+        oval.width / 2,
+        oval.height / 2,
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fillStyle = "white";
+      ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+    }
 
     validFaceRef.current = false;
+    const task = currentTaskRef.current;
+    const threshold = task?.confidenceThreshold ?? CAPTURE.confidenceThreshold;
 
     if (detections.length > 0) {
       const detection = [...detections].sort(
@@ -137,7 +235,7 @@ export function CaptureStage({ active }: CaptureStageProps) {
       )[0];
       const confidence = detection.categories[0]?.score ?? 0;
       const box = detection.boundingBox;
-      if (confidence >= CAPTURE.confidenceThreshold && box) {
+      if (confidence >= threshold && box) {
         let x = box.originX * ratio;
         const y = box.originY * ratio;
         const width = box.width * ratio;
@@ -150,31 +248,45 @@ export function CaptureStage({ active }: CaptureStageProps) {
         const centered = isFaceCentered(faceCenterX, faceCenterY, oval);
         validFaceRef.current = within && centered;
 
-        if (!countdownRef.current.active) {
+        if (bankIdRef.current === "VPB") {
+          const direction = getFaceDirection(detection.keypoints);
+          setFaceDirection(`Your face is turning: ${direction}`);
+        }
+
+        if (!countdownRef.current.active && sizePhaseRef.current !== "grow") {
           setInstruction(
             validFaceRef.current
-              ? "Hold still to start recording"
+              ? task?.label === "Left"
+                ? "Hold still to start recording"
+                : task?.label === "Right"
+                  ? "Hold still to start recording"
+                  : "Hold still to start recording"
               : guidanceText({
                   fillPercent,
                   faceCenterX,
                   faceCenterY,
                   oval,
                   closeUp: closeUpRef.current,
+                  turnLabel: task?.isTurnFace ? task.label : undefined,
                 })
           );
         }
       } else if (!countdownRef.current.active) {
         setInstruction(
-          closeUpRef.current
-            ? "No face detected for second capture"
-            : "No face detected"
+          task?.isTurnFace
+            ? `No face detected for ${task.label} capture`
+            : closeUpRef.current
+              ? "No face detected for second capture"
+              : "No face detected"
         );
       }
     } else if (!countdownRef.current.active) {
       setInstruction(
-        closeUpRef.current
-          ? "No face detected for second capture"
-          : "No face detected"
+        task?.isTurnFace
+          ? `No face detected for ${task.label} capture`
+          : closeUpRef.current
+            ? "No face detected for second capture"
+            : "No face detected"
       );
     }
 
@@ -192,19 +304,26 @@ export function CaptureStage({ active }: CaptureStageProps) {
     ctx.lineWidth = 3;
     ctx.stroke();
 
-    ctx.globalCompositeOperation = "destination-over";
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.globalCompositeOperation = "source-over";
+    if (!fullFrameRef.current) {
+      ctx.globalCompositeOperation = "destination-over";
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = "source-over";
+    }
   }, []);
 
   const beginRecording = useCallback(() => {
+    const video = videoRef.current;
     const stream = streamRef.current;
-    if (!stream) return;
+    if (!video || !stream) return;
     stopRecorder();
     chunksRef.current = [];
     try {
-      const recorder = startMediaRecorder(stream);
+      if (!recCanvasRef.current) recCanvasRef.current = document.createElement("canvas");
+      const built = buildRecordingStream(video, currentTaskRef.current, recCanvasRef.current);
+      recStopRef.current = built.stop;
+      const bitrate = currentTaskRef.current?.videoBitsPerSecond ?? 8_000_000;
+      const recorder = startMediaRecorder(built.stream, bitrate);
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
@@ -215,12 +334,36 @@ export function CaptureStage({ active }: CaptureStageProps) {
     }
   }, [stopRecorder]);
 
+  const applyFlashForHold = useCallback((elapsed: number) => {
+    const task = currentTaskRef.current;
+    if (task) {
+      const flashSec = task.flashSecond;
+      if (flashSec === 0) setFlashVisible(Boolean(flashColorRef.current));
+      else if (flashSec > 0) {
+        setFlashVisible((elapsed % (flashSec * 2)) < flashSec);
+      } else {
+        setFlashVisible(false);
+      }
+      return;
+    }
+    if (!genericFlashRef.current) {
+      setFlashVisible(false);
+      return;
+    }
+    if (elapsed > CAPTURE.countdownDuration / 4) {
+      setFlashVisible((elapsed % CAPTURE.flashSecond) * 2 < CAPTURE.flashSecond);
+    } else {
+      setFlashVisible(true);
+    }
+  }, []);
+
   const completeCurrentTake = useCallback(async () => {
     if (takeLockRef.current) return;
     takeLockRef.current = true;
     countdownRef.current.active = false;
     setShowProgress(false);
     setFlashVisible(false);
+    setTurnArrow(null);
     setPhase("processing");
 
     const recorder = recorderRef.current;
@@ -232,6 +375,8 @@ export function CaptureStage({ active }: CaptureStageProps) {
       recorder.onstop = () => resolve();
       recorder.stop();
     });
+    recStopRef.current?.();
+    recStopRef.current = null;
 
     const videoEl = videoRef.current;
     if (!videoEl) {
@@ -248,12 +393,41 @@ export function CaptureStage({ active }: CaptureStageProps) {
     chunksRef.current = [];
 
     try {
-      const photo = await capturePhotoFromVideo(videoEl);
+      const task = currentTaskRef.current;
+      const photo = await capturePhotoFromVideo(videoEl, {
+        width: task?.photoResolutionX ?? task?.resolutionX,
+        height: task?.photoResolutionY ?? task?.resolutionY,
+      });
+
+      if (task && bankIdRef.current) {
+        bankBlobsRef.current.push({
+          config: task,
+          video: task.isVideo ? videoBlob : null,
+          photo,
+        });
+        const nextIndex = taskIndexRef.current + 1;
+        const bank = bankIdRef.current;
+        const tasks = BANKS[bank];
+        if (nextIndex >= tasks.length) {
+          setInstruction("Processing captures...");
+          await downloadBankZip(bankBlobsRef.current);
+          setInstruction("All captures completed");
+          setPhase("done");
+          setShowRestart(true);
+          takeLockRef.current = false;
+          return;
+        }
+        taskIndexRef.current = nextIndex;
+        applyTask(tasks[nextIndex], nextIndex, bank);
+        setPhase("capturing");
+        takeLockRef.current = false;
+        return;
+      }
 
       if (!closeUpRef.current) {
         standardRef.current = { video: videoBlob, photo };
         closeUpRef.current = true;
-        resizeCanvas();
+        applyOvalParams(genericOvalParams(true));
         validFaceRef.current = false;
         countdownRef.current = { active: false, startedAt: 0 };
         setInstruction("Position for second capture (larger frame)");
@@ -281,7 +455,77 @@ export function CaptureStage({ active }: CaptureStageProps) {
     } finally {
       takeLockRef.current = false;
     }
-  }, [resizeCanvas]);
+  }, [applyOvalParams, applyTask]);
+
+  const startHold = useCallback(
+    (now: number) => {
+      countdownRef.current = { active: true, startedAt: now };
+      setShowProgress(true);
+      setProgress(0);
+      if (!recorderRef.current || recorderRef.current.state === "inactive") {
+        beginRecording();
+      }
+    },
+    [beginRecording]
+  );
+
+  const tickHold = useCallback(
+    (now: number) => {
+      const task = currentTaskRef.current;
+      const duration = task?.recordSecond ?? CAPTURE.countdownDuration;
+      const elapsed = (now - countdownRef.current.startedAt) / 1000;
+      const remaining = Math.max(0, Math.ceil(duration - elapsed));
+      setProgress(Math.min((elapsed / duration) * 100, 100));
+
+      if (task?.label === "Left") {
+        setInstruction(`Face left slowly for ${remaining} second${remaining === 1 ? "" : "s"}`);
+        setTurnArrow("left");
+      } else if (task?.label === "Right") {
+        setInstruction(`Face right slowly for ${remaining} second${remaining === 1 ? "" : "s"}`);
+        setTurnArrow("right");
+      } else {
+        setInstruction(`Hold still for ${remaining} second${remaining === 1 ? "" : "s"}`);
+        setTurnArrow(null);
+      }
+
+      applyFlashForHold(elapsed);
+      if (elapsed >= duration) void completeCurrentTake();
+    },
+    [applyFlashForHold, completeCurrentTake]
+  );
+
+  const cancelHold = useCallback(() => {
+    countdownRef.current.active = false;
+    setShowProgress(false);
+    setProgress(0);
+    setTurnArrow(null);
+    const task = currentTaskRef.current;
+    if (!task?.enableFlashCoverageGate) setFlashVisible(false);
+    stopRecorder();
+    if (task?.ovalSizeTrans) {
+      sizePhaseRef.current = "waitFrom";
+      sizeHoldStartRef.current = 0;
+      applyOvalParams(
+        taskOvalParams(task, {
+          widthRatio: task.ovalSizeTrans.fromWidthRatio,
+          heightRatio: task.ovalSizeTrans.fromHeightRatio,
+          minFillRatio: task.ovalSizeTrans.fromMinFillRatio,
+          maxFillRatio: task.ovalSizeTrans.fromMaxFillRatio,
+          maxOffsetX: task.ovalSizeTrans.fromMaxOffsetX,
+          maxOffsetY: task.ovalSizeTrans.fromMaxOffsetY,
+        })
+      );
+      setInstruction("Position your face in the oval");
+      return;
+    }
+    setInstruction(
+      closeUpRef.current
+        ? "Position for second capture"
+        : task?.isTurnFace
+          ? `Turn your face ${task.label.toLowerCase()}`
+          : "Please keep your face in position"
+    );
+  }, [applyOvalParams, stopRecorder]);
 
   useEffect(() => {
     if (!active || phase !== "capturing") return;
@@ -303,55 +547,82 @@ export function CaptureStage({ active }: CaptureStageProps) {
         lastDetectRef.current = now;
         try {
           const result = detector.detectForVideo(video, now);
-          drawFrame(result.detections ?? []);
+          const detections = result.detections ?? [];
+          drawFrame(detections);
 
-          if (validFaceRef.current) {
-            if (!countdownRef.current.active) {
-              countdownRef.current = { active: true, startedAt: now };
-              setShowProgress(true);
-              setProgress(0);
-              beginRecording();
-            } else {
-              const elapsed = (now - countdownRef.current.startedAt) / 1000;
-              const remaining = Math.max(
-                0,
-                Math.ceil(CAPTURE.countdownDuration - elapsed)
-              );
-              const percent = Math.min(
-                (elapsed / CAPTURE.countdownDuration) * 100,
-                100
-              );
-              setProgress(percent);
-              setInstruction(
-                `Hold still for ${remaining} second${remaining === 1 ? "" : "s"}`
-              );
+          const task = currentTaskRef.current;
+          const top = detections[0];
+          const direction: FaceDirection = getFaceDirection(top?.keypoints);
+          if (task && turnConflicts(task.label, direction)) {
+            if (countdownRef.current.active) cancelHold();
+            raf = requestAnimationFrame(tick);
+            return;
+          }
 
-              if (flashColorRef.current) {
-                if (elapsed > CAPTURE.countdownDuration / 4) {
-                  const blink =
-                    (elapsed % CAPTURE.flashSecond) * 2 < CAPTURE.flashSecond;
-                  setFlashVisible(blink);
+          if (task?.enableFlashCoverageGate && !countdownRef.current.active) {
+            setFlashVisible(validFaceRef.current && Boolean(flashColorRef.current));
+          }
+
+          const trans = task?.ovalSizeTrans;
+          const sizePhase = sizePhaseRef.current;
+
+          if (task && trans && sizePhase && sizePhase !== "hold") {
+            if (sizePhase === "grow") {
+              const t = trans.time <= 0 ? 1 : (now - sizeGrowStartRef.current) / trans.time;
+              applyOvalParams(sizeTransAt(task, trans, t));
+              setInstruction("Move closer to the camera");
+              if (t >= 1) {
+                sizePhaseRef.current = "waitTo";
+                sizeHoldStartRef.current = 0;
+                applyOvalParams(taskOvalParams(task));
+                setInstruction("Move closer — fill the larger oval");
+              } else if (!top) {
+                cancelHold();
+              }
+            } else if (sizePhase === "waitFrom") {
+              if (!validFaceRef.current) {
+                sizeHoldStartRef.current = 0;
+                setInstruction("Position your face in the oval");
+              } else {
+                if (!recorderRef.current || recorderRef.current.state === "inactive") {
+                  beginRecording();
+                }
+                if (!sizeHoldStartRef.current) sizeHoldStartRef.current = now;
+                const held = now - sizeHoldStartRef.current;
+                if (held < trans.fromRecordTime) {
+                  const remain = Math.ceil((trans.fromRecordTime - held) / 1000);
+                  setInstruction(`Hold still for ${remain} second${remain === 1 ? "" : "s"}`);
+                  setShowProgress(true);
+                  setProgress((held / trans.fromRecordTime) * 100);
                 } else {
-                  setFlashVisible(true);
+                  sizeHoldStartRef.current = 0;
+                  sizeGrowStartRef.current = now;
+                  sizePhaseRef.current = "grow";
+                  setShowProgress(false);
+                  setInstruction("Move closer to the camera");
                 }
               }
-
-              if (elapsed >= CAPTURE.countdownDuration) {
-                void completeCurrentTake();
-                return;
+            } else if (sizePhase === "waitTo") {
+              if (!validFaceRef.current) {
+                sizeHoldStartRef.current = 0;
+                setInstruction("Move closer — fill the larger oval");
+              } else if (trans.toRecordTime <= 0) {
+                sizePhaseRef.current = "hold";
+                startHold(now);
+              } else {
+                if (!sizeHoldStartRef.current) sizeHoldStartRef.current = now;
+                const held = now - sizeHoldStartRef.current;
+                if (held >= trans.toRecordTime) {
+                  sizePhaseRef.current = "hold";
+                  startHold(now);
+                }
               }
             }
+          } else if (validFaceRef.current) {
+            if (!countdownRef.current.active) startHold(now);
+            else tickHold(now);
           } else if (countdownRef.current.active) {
-            countdownRef.current.active = false;
-            setShowProgress(false);
-            setProgress(0);
-            setFlashVisible(false);
-            stopRecorder();
-            setInstruction(
-              closeUpRef.current
-                ? "Position for second capture"
-                : "Please keep your face in position"
-            );
+            cancelHold();
           }
         } catch (err) {
           console.error(err);
@@ -366,24 +637,28 @@ export function CaptureStage({ active }: CaptureStageProps) {
       cancelled = true;
       cancelAnimationFrame(raf);
     };
-  }, [active, beginRecording, completeCurrentTake, drawFrame, phase, stopRecorder]);
+  }, [
+    active,
+    applyOvalParams,
+    beginRecording,
+    cancelHold,
+    drawFrame,
+    phase,
+    startHold,
+    tickHold,
+  ]);
 
   const loadDetector = useCallback(async () => {
     const vision = await import("@mediapipe/tasks-vision");
     const fileset = await vision.FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_CDN);
     try {
       detectorRef.current = await vision.FaceDetector.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath: FACE_MODEL_PATH,
-          delegate: "GPU",
-        },
+        baseOptions: { modelAssetPath: FACE_MODEL_PATH, delegate: "GPU" },
         runningMode: "VIDEO",
       });
     } catch {
       detectorRef.current = await vision.FaceDetector.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath: FACE_MODEL_PATH,
-        },
+        baseOptions: { modelAssetPath: FACE_MODEL_PATH },
         runningMode: "VIDEO",
       });
     }
@@ -426,6 +701,10 @@ export function CaptureStage({ active }: CaptureStageProps) {
       countdownRef.current = { active: false, startedAt: 0 };
       validFaceRef.current = false;
       takeLockRef.current = false;
+      currentTaskRef.current = null;
+      bankIdRef.current = null;
+      ovalParamsRef.current = genericOvalParams(false);
+      fullFrameRef.current = false;
 
       try {
         await startCamera(resolution);
@@ -438,7 +717,7 @@ export function CaptureStage({ active }: CaptureStageProps) {
           await navigator.wakeLock.request("screen").catch(() => undefined);
         }
         setPhase("capturing");
-        setShowFlashSelect(true);
+        setShowModeSelect(true);
         setInstruction("Position your face in the oval");
       } catch (err) {
         console.error(err);
@@ -464,17 +743,26 @@ export function CaptureStage({ active }: CaptureStageProps) {
     setShowProgress(false);
     setProgress(0);
     setFlashVisible(false);
+    setTurnArrow(null);
     setError(null);
     if (!resolutionRef.current || !streamRef.current) {
       setPhase("pick-resolution");
-      setShowFlashSelect(false);
+      setShowModeSelect(false);
       setInstruction("Please Select Resolution");
       return;
     }
-    resizeCanvas();
+    const bank = bankIdRef.current;
+    if (bank) {
+      bankBlobsRef.current = [];
+      taskIndexRef.current = 0;
+      applyTask(BANKS[bank][0], 0, bank);
+      setPhase("capturing");
+      return;
+    }
+    applyOvalParams(genericOvalParams(false));
     setInstruction("Position your face in the oval");
     setPhase("capturing");
-  }, [resizeCanvas, stopRecorder]);
+  }, [applyOvalParams, applyTask, stopRecorder]);
 
   useEffect(() => {
     if (!active) return;
@@ -498,13 +786,44 @@ export function CaptureStage({ active }: CaptureStageProps) {
     void startSession(next);
   }
 
-  function onFlashChange(value: FlashModeId) {
-    setFlashMode(value);
-    const mode = FLASH_MODES.find((item) => item.id === value);
-    flashColorRef.current = mode?.color ?? null;
-    setFlashColor(mode?.color ?? null);
-    setFlashVisible(Boolean(mode?.color));
+  function onModeChange(value: string) {
+    setModeId(value);
+    modeRef.current = value;
+    stopRecorder();
+    countdownRef.current = { active: false, startedAt: 0 };
+    closeUpRef.current = false;
+    takeLockRef.current = false;
+    setShowRestart(false);
+    setShowProgress(false);
+    setProgress(0);
+    setFaceDirection("");
+    setTurnArrow(null);
+
+    if (isBankId(value)) {
+      bankIdRef.current = value;
+      bankBlobsRef.current = [];
+      taskIndexRef.current = 0;
+      applyTask(BANKS[value][0], 0, value);
+      setPhase("capturing");
+      return;
+    }
+
+    bankIdRef.current = null;
+    currentTaskRef.current = null;
+    sizePhaseRef.current = null;
+    fullFrameRef.current = false;
+    setTaskBadge("");
+    const option = MODE_OPTIONS.find((item) => item.id === value);
+    genericFlashRef.current = option?.color ?? null;
+    flashColorRef.current = option?.color ?? null;
+    setFlashColor(option?.color ?? null);
+    setFlashVisible(Boolean(option?.color));
+    applyOvalParams(genericOvalParams(false));
+    setInstruction("Position your face in the oval");
+    setPhase("capturing");
   }
+
+  const selectColor = flashColor ?? "grey";
 
   if (!active) return null;
 
@@ -529,10 +848,32 @@ export function CaptureStage({ active }: CaptureStageProps) {
         }}
       />
 
+      {faceDirection ? (
+        <div className="absolute top-3 left-3 z-40 rounded-lg bg-black/70 px-2 py-1 text-sm font-bold text-white">
+          {faceDirection}
+        </div>
+      ) : null}
+
+      {taskBadge ? (
+        <div className="absolute top-3 right-3 z-40 rounded-lg bg-black/70 px-2 py-1 text-xs font-bold tracking-wide text-emerald-200">
+          {taskBadge}
+        </div>
+      ) : null}
+
       <div className="absolute inset-x-0 bottom-[max(16px,env(safe-area-inset-bottom))] z-30 flex flex-col items-center gap-2 px-4 sm:bottom-8">
         {instruction ? (
           <div className="w-[90%] max-w-md rounded-xl bg-black/80 px-4 py-3.5 text-center text-lg font-bold leading-snug text-white shadow-lg sm:text-xl">
-            {instruction}
+            <div>{instruction}</div>
+            {turnArrow === "left" ? (
+              <span className="mt-1 block animate-[slide_0.5s_infinite] text-4xl text-[#4CAF50]">
+                {"<<<"}
+              </span>
+            ) : null}
+            {turnArrow === "right" ? (
+              <span className="mt-1 block animate-[slide_0.5s_infinite] text-4xl text-[#4CAF50]">
+                {">>>"}
+              </span>
+            ) : null}
           </div>
         ) : null}
 
@@ -580,18 +921,18 @@ export function CaptureStage({ active }: CaptureStageProps) {
           </select>
         ) : null}
 
-        {showFlashSelect ? (
+        {showModeSelect ? (
           <select
-            aria-label="Flash mode"
+            aria-label="Bank or flash mode"
             className="rounded-[10px] px-3 py-2.5 text-base font-bold text-white"
             style={{
-              backgroundColor: flashColor ?? "grey",
-              color: flashColor === "#ffffff" ? "#111" : "#fff",
+              backgroundColor: selectColor,
+              color: selectColor === "#ffffff" || selectColor === "#FFCF0C" ? "#111" : "#fff",
             }}
-            value={flashMode}
-            onChange={(event) => onFlashChange(event.target.value as FlashModeId)}
+            value={modeId}
+            onChange={(event) => onModeChange(event.target.value)}
           >
-            {FLASH_MODES.map((item) => (
+            {MODE_OPTIONS.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label}
               </option>

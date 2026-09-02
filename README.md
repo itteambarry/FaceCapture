@@ -8,9 +8,15 @@ A full-screen face capture and liveness web app. It mirrors the flow of a camera
 2. **Brightness guide** — asks you to turn the screen up before capture.
 3. **Resolution picker** — 1920×1440, 1200×1600, 1080×1440, or 1280×720.
 4. **Oval alignment** — MediaPipe face detection with live coaching (move closer, left, right, hold still).
-5. **Two captures** — a standard oval, then a closer / wider oval. Each records ~5 seconds of video plus a JPEG.
-6. **Flash modes** — `noflash`, `red`, `orange`, `white`, `blue`, `green`.
-7. **Download** — both takes are packed into a ZIP in the browser.
+5. **Generic capture** — `noflash` / `red` / `orange` run a two-shot oval (standard, then closer).
+6. **Bank sequences** — pick `VPB`, `BIDV`, `VCB`, `DAB`, `VIB`, `VTB`, `KTB`, `STB`, or `SCB` to run that bank’s exact task list (oval size, flash colour, hold time, photo vs video, ZIP names).
+   - **VCB / BIDV / VTB / STB** — NoFlash, then White / Red / Blue / Green holds.
+   - **VIB** — Far, Near, Flash Grey, Flash Orange.
+   - **DAB** — single standard take, 90° CW video, 1 Mbps.
+   - **VPB** — Frontal, then turn Left, then turn Right (photos).
+   - **SCB** — Far 10s, then Near with a small→large oval grow.
+   - **KTB** — NoFlash, Green, Blue, Magenta, Gold with 90° CW 720p video.
+7. **Download** — captures are packed into a ZIP in the browser.
 
 Camera frames stay on the device. Nothing is uploaded.
 
