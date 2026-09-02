@@ -71,6 +71,32 @@ export async function downloadBankZip(captures: BankCapture[]) {
   triggerDownload(await zip.generateAsync({ type: "blob" }), `face-captures-${timestamp}.zip`);
 }
 
+export function drawVideoCover(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  outW: number,
+  outH: number,
+  rotate90CW = false
+) {
+  ctx.save();
+  if (rotate90CW) {
+    ctx.translate(outW, 0);
+    ctx.rotate(Math.PI / 2);
+    const drawW = outH;
+    const drawH = outW;
+    const scale = Math.max(drawW / video.videoWidth, drawH / video.videoHeight);
+    const dw = video.videoWidth * scale;
+    const dh = video.videoHeight * scale;
+    ctx.drawImage(video, (drawW - dw) / 2, (drawH - dh) / 2, dw, dh);
+  } else {
+    const scale = Math.max(outW / video.videoWidth, outH / video.videoHeight);
+    const dw = video.videoWidth * scale;
+    const dh = video.videoHeight * scale;
+    ctx.drawImage(video, (outW - dw) / 2, (outH - dh) / 2, dw, dh);
+  }
+  ctx.restore();
+}
+
 export function capturePhotoFromVideo(
   video: HTMLVideoElement,
   size?: { width?: number; height?: number }
@@ -80,7 +106,7 @@ export function capturePhotoFromVideo(
   canvas.height = size?.height || video.videoHeight;
   const ctx = canvas.getContext("2d");
   if (!ctx) return Promise.reject(new Error("Canvas unavailable"));
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  drawVideoCover(ctx, video, canvas.width, canvas.height);
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -114,11 +140,12 @@ export function startMediaRecorder(
 export function buildRecordingStream(
   video: HTMLVideoElement,
   task: BankTask | null,
-  recCanvas: HTMLCanvasElement
+  recCanvas: HTMLCanvasElement,
+  fallback?: { width: number; height: number }
 ): { stream: MediaStream; stop: () => void } {
   const rotate = Boolean(task?.videoRotate90CW);
-  const targetW = task?.videoResolutionX;
-  const targetH = task?.videoResolutionY;
+  const targetW = task?.videoResolutionX ?? fallback?.width;
+  const targetH = task?.videoResolutionY ?? fallback?.height;
 
   if (!rotate && !targetW && !targetH) {
     return { stream: video.srcObject as MediaStream, stop: () => undefined };
@@ -141,15 +168,7 @@ export function buildRecordingStream(
       return;
     }
     lastPaint = timestamp;
-    ctx.save();
-    if (rotate) {
-      ctx.translate(recCanvas.width, 0);
-      ctx.rotate(Math.PI / 2);
-      ctx.drawImage(video, 0, 0, outH, outW);
-    } else {
-      ctx.drawImage(video, 0, 0, outW, outH);
-    }
-    ctx.restore();
+    drawVideoCover(ctx, video, outW, outH, rotate);
     raf = requestAnimationFrame(draw);
   };
   raf = requestAnimationFrame(draw);

@@ -9,6 +9,7 @@ import {
   type BankId,
   type BankTask,
 } from "@/lib/bank-profiles";
+import { captureSizeLabel, openUserCamera } from "@/lib/camera";
 import {
   CAPTURE,
   FACE_MODEL_PATH,
@@ -320,7 +321,12 @@ export function CaptureStage({ active }: CaptureStageProps) {
     chunksRef.current = [];
     try {
       if (!recCanvasRef.current) recCanvasRef.current = document.createElement("canvas");
-      const built = buildRecordingStream(video, currentTaskRef.current, recCanvasRef.current);
+      const built = buildRecordingStream(
+        video,
+        currentTaskRef.current,
+        recCanvasRef.current,
+        resolutionRef.current ?? undefined
+      );
       recStopRef.current = built.stop;
       const bitrate = currentTaskRef.current?.videoBitsPerSecond ?? 8_000_000;
       const recorder = startMediaRecorder(built.stream, bitrate);
@@ -394,9 +400,10 @@ export function CaptureStage({ active }: CaptureStageProps) {
 
     try {
       const task = currentTaskRef.current;
+      const selected = resolutionRef.current;
       const photo = await capturePhotoFromVideo(videoEl, {
-        width: task?.photoResolutionX ?? task?.resolutionX,
-        height: task?.photoResolutionY ?? task?.resolutionY,
+        width: task?.photoResolutionX ?? task?.resolutionX ?? selected?.width,
+        height: task?.photoResolutionY ?? task?.resolutionY ?? selected?.height,
       });
 
       if (task && bankIdRef.current) {
@@ -669,14 +676,7 @@ export function CaptureStage({ active }: CaptureStageProps) {
     if (!video) throw new Error("Video element missing");
     streamRef.current?.getTracks().forEach((track) => track.stop());
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "user",
-        width: { ideal: resolution.width },
-        height: { ideal: resolution.height },
-      },
-      audio: false,
-    });
+    const stream = await openUserCamera(resolution);
     streamRef.current = stream;
     video.srcObject = stream;
     await video.play();
@@ -684,7 +684,12 @@ export function CaptureStage({ active }: CaptureStageProps) {
       if (video.readyState >= 2) resolve();
       else video.onloadedmetadata = () => resolve();
     });
-    setResolutionLabel(`video: ${video.videoWidth} × ${video.videoHeight}`);
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+    const track = stream.getVideoTracks()[0];
+    const settings = track?.getSettings?.() ?? {};
+    const cameraWidth = settings.width ?? video.videoWidth;
+    const cameraHeight = settings.height ?? video.videoHeight;
+    setResolutionLabel(captureSizeLabel(resolution, cameraWidth, cameraHeight));
   }, []);
 
   const startSession = useCallback(
